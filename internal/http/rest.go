@@ -1,0 +1,96 @@
+package http
+
+import (
+	"fmt"
+
+	"io/ioutil"
+	"net/http"
+
+	"github.com/rs/zerolog/log"
+	"macinvoice/internal/models"
+)
+
+type REST interface {
+	POST(url string, headers map[string]string, requestPayload []byte) models.RESTResponse
+	GET(url string, headers map[string]string) models.RESTResponse
+}
+
+type service struct {
+	Config
+}
+
+func NewService(config Config) (REST, error) {
+
+	return &service{config}, nil
+}
+
+func (s *service) GET(url string, headers map[string]string) models.RESTResponse {
+	log.Info().Msg("http.GET() executed")
+	var retries = 0
+	var err error
+	var respBytes []byte
+	var statusCode = 0
+	var resp *http.Response
+	var req *http.Request
+
+	client := http.Client{
+		Transport:     nil,
+		CheckRedirect: nil,
+		Jar:           nil,
+		Timeout:       s.ClientTimeout,
+	}
+
+	req, err = http.NewRequest(http.MethodGet, url, nil) // TODO: we might need to send a request body soon
+	if err != nil {
+		return models.RESTResponse{
+			Code:  statusCode,
+			Body:  respBytes,
+			Error: err,
+		}
+	}
+
+	log.Debug().Msg("==HEADERS[START]==")
+	for k, v := range headers {
+		log.Debug().Msg(fmt.Sprintf("k: %s; v: %s", k, v))
+		req.Header.Set(k, v)
+	}
+	log.Debug().Msg("==HEADERS[END]==")
+
+	for {
+
+		if retries == s.MaxRetries {
+			log.Debug().Msg("Maximum retries reached.")
+			break
+		}
+
+		resp, err = client.Do(req)
+		if err == nil && resp != nil {
+
+			statusCode = resp.StatusCode
+			respBytes, err = ioutil.ReadAll(resp.Body)
+
+			if statusCode == http.StatusOK {
+				break
+			}
+
+		}
+
+		retries++
+
+	}
+
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+
+	return models.RESTResponse{
+		Code:  statusCode,
+		Body:  respBytes,
+		Error: err,
+	}
+}
+
+func (s *service) POST(url string, headers map[string]string, requestPayload []byte) models.RESTResponse {
+	panic("implement me")
+	return models.RESTResponse{}
+}
